@@ -19,7 +19,7 @@ import numpy as np
 
 SAMPLE_RATE = 16000
 DEFAULT_PROFILE_PATH = "voice_profile.npy"
-DEFAULT_THRESHOLD = 0.72
+DEFAULT_THRESHOLD = 0.62
 EMBEDDING_SIZE = 256
 MIN_AUDIO_SAMPLES = SAMPLE_RATE * 2 // 5  # ~0.4s minimum for a stable embedding
 
