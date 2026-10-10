@@ -10,6 +10,8 @@ import sounddevice as sd
 import ollama
 from vosk import Model as VoskModel, KaldiRecognizer
 
+import msvcrt
+
 from audio_io import SpeechEngine
 from actions import DesktopController
 from overlay import start_overlay
@@ -22,7 +24,7 @@ from auto_trainer import auto_trainer
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 4000  # 250ms audio blocks
 VOICE_PROFILE_PATH = "voice_profile.npy"
-VERIFY_THRESHOLD = 0.70
+VERIFY_THRESHOLD = float(os.environ.get("JARVIS_VERIFY_THRESHOLD", "0.62"))
 OLLAMA_HOST = os.environ.get("JARVIS_OLLAMA_HOST", os.environ.get("JADDU_OLLAMA_HOST", "http://localhost:11434"))
 OLLAMA_MODEL = os.environ.get("JARVIS_OLLAMA_MODEL", "jarvis")
 OLLAMA_MODEL_PREFERENCE = [
@@ -39,6 +41,7 @@ speech_engine = SpeechEngine(model_size="base.en", device="cpu", compute_type="i
 
 print("Initializing Speaker Verifier (voice biometrics)...")
 speaker = SpeakerVerifier(profile_path=VOICE_PROFILE_PATH, threshold=VERIFY_THRESHOLD)
+speaker.threshold = VERIFY_THRESHOLD
 if not speaker.profile_exists:
     print(f"[!] No voice profile found at '{VOICE_PROFILE_PATH}'.")
     print(f"[!] Run `python enroll_voice.py` to enroll your voice.")
@@ -519,15 +522,15 @@ def capture_command() -> str:
     """Captures user spoken command via VAD state machine."""
     _drain_queue()
 
-    speech_threshold_rms = 110.0
-    preroll_buffer = deque(maxlen=3)
+    speech_threshold_rms = 65.0  # sensitive enough for standard laptop/desktop mic (~30-50 ambient)
+    preroll_buffer = deque(maxlen=4)  # ~1.0s buffer to preserve initial consonant
     recorded_frames = []
     silence_frames = 0
     speech_started = False
-    max_wait_frames = 24  # ~6.0s max wait before user starts speaking
-    max_speech_frames = 40  # ~10s max speech length
+    max_wait_frames = 28  # ~7.0s max wait before user starts speaking
+    max_speech_frames = 48  # ~12s max speech length
 
-    print("\n[VAD] Listening for command...", flush=True)
+    print("\n[VAD] Listening for command (speak now)...", flush=True)
 
     while True:
         data = audio_queue.get()
@@ -542,7 +545,7 @@ def capture_command() -> str:
             else:
                 max_wait_frames -= 1
                 if max_wait_frames <= 0:
-                    print("[VAD] Timed out waiting for speech.", flush=True)
+                    print(f"[VAD] Timed out waiting for speech (ambient RMS: {rms:.0f}).", flush=True)
                     break
         else:
             recorded_frames.append(data)
@@ -567,18 +570,19 @@ def capture_command() -> str:
     return text.strip()
 
 
-def handle_wake(wake_audio: bytes, ui_pill):
+def handle_wake(wake_audio, ui_pill):
     """Full wake interaction flow with voice biometrics, persistent memory, and Jarvis execution."""
     ui_pill.set_state("VERIFYING")
 
-    if not speaker.profile_exists:
-        print("\n[Verify] Note: No enrolled voice profile found at 'voice_profile.npy'.", flush=True)
-        print("[Verify] Running in OPEN mode. Run `python enroll_voice.py` to secure with owner voice biometrics.\n", flush=True)
+    # If wake triggered by keyboard or no profile exists, bypass verification
+    if wake_audio is None or not speaker.profile_exists:
+        if wake_audio is not None and not speaker.profile_exists:
+            print("\n[Verify] Note: Running in OPEN mode (no voice profile enrolled).", flush=True)
         is_owner = True
     else:
         is_owner, similarity = speaker.verify(wake_audio)
-        threshold = speaker.enrollment_metadata.get("threshold", VERIFY_THRESHOLD)
-        print(f"\n[Verify] Similarity: {similarity:.3f} / threshold {threshold} -> "
+        threshold = speaker.threshold
+        print(f"\n[Verify] Similarity: {similarity:.3f} / threshold {threshold:.2f} -> "
               f"{'ACCEPTED' if is_owner else 'REJECTED'}", flush=True)
 
         if not is_owner:
@@ -628,7 +632,7 @@ def main():
 
     print("\n=======================================================", flush=True)
     print(" J.A.R.V.I.S. is Online! (OpenJarvis Architecture)", flush=True)
-    print(" Call 'Jarvis' or 'Hey Jarvis' to activate.", flush=True)
+    print(" Call 'Jarvis' or 'Hey Jarvis' to activate (or press ENTER in terminal).", flush=True)
     print(" Owner voice verification is active on your profile.", flush=True)
     print(" Press Ctrl+C in terminal to exit.", flush=True)
     print("=======================================================\n", flush=True)
@@ -637,7 +641,10 @@ def main():
     wake_phonetic_patterns = [
         "jarvis", "hey jarvis", "hello jarvis", "hi jarvis", "ok jarvis", "okay jarvis",
         "jar vis", "service", "travis", "harvest", "charvis", "jervis", "star wars",
-        "jar was", "jar is", "javis", "charles",
+        "jar was", "jar is", "javis", "charles", "justice", "drivers",
+        # Observed Kaldi phonetic decodings for "Jarvis" with Indian accent
+        "jersey", "jared", "damage", "hey jersey", "hello jersey", "hey jared", "hello jared",
+        "hey damage", "hey service", "hello service",
         # Backward compatible patterns
         "hello do", "hello due", "hello dew", "hello judo", "hello dude", "hello jaddu",
         "hello jadu", "hey do", "hey judo", "hey jaddu", "hey jadu", "hi jaddu",
@@ -648,18 +655,44 @@ def main():
         t = text.lower().strip()
         if not t:
             return False
+        # Direct pattern match
         if any(p in t for p in wake_phonetic_patterns):
             return True
         words = t.split()
-        if 1 <= len(words) <= 3 and words[0] in ["hello", "hey", "hi", "jarvis"]:
+        # Word-level phonetic matching
+        for w in words:
+            if w in [
+                "jarvis", "jersey", "jared", "damage", "jervis", "javis",
+                "charvis", "service", "travis", "harvest", "jaddu", "jadu", "judo", "drivers"
+            ]:
+                return True
+            if w.startswith("jar") or w.startswith("jer") or w.startswith("jadd"):
+                return True
+        # Matches any short greeting (1-3 words) starting with hello/hey/hi/ok/okay/jarvis
+        if 1 <= len(words) <= 3 and words[0] in [
+            "hello", "hey", "hi", "halo", "ok", "okay", "jarvis", "jersey", "jared"
+        ]:
             return True
         return False
 
     wake_ring = deque(maxlen=int(2.0 * SAMPLE_RATE / BLOCK_SIZE))
 
     with stream:
-        print("[Vosk] Listening for wake word ('Jarvis')...", flush=True)
+        print("[Vosk] Listening for wake word ('Jarvis' or press ENTER)...", flush=True)
         while True:
+            # Instant Keyboard trigger: Press ENTER or Space in terminal anytime to talk
+            if msvcrt.kbhit():
+                ch = msvcrt.getch()
+                if ch in [b'\r', b'\n', b' ']:
+                    print("\n[!] Keyboard trigger activated! Listening for command...", flush=True)
+                    rec.Reset()
+                    _drain_queue()
+                    handle_wake(None, ui_pill)
+                    wake_ring.clear()
+                    rec.Reset()
+                    print("\n[Vosk] Listening for 'Jarvis' (or press ENTER)...", flush=True)
+                    continue
+
             data = audio_queue.get()
             wake_ring.append(data)
 
@@ -686,7 +719,7 @@ def main():
 
                 wake_ring.clear()
                 rec.Reset()
-                print("\n[Vosk] Listening for 'Jarvis'...", flush=True)
+                print("\n[Vosk] Listening for 'Jarvis' (or press ENTER)...", flush=True)
 
 
 if __name__ == "__main__":
