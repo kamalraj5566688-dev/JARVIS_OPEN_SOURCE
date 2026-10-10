@@ -61,8 +61,44 @@ os.environ["OLLAMA_HOST"] = OLLAMA_HOST
 ollama.host = OLLAMA_HOST
 
 
+def ensure_ollama_running():
+    """Checks if Ollama is running; if not, automatically launches 'ollama serve' in background."""
+    try:
+        ollama.list()
+        return True
+    except Exception:
+        pass
+
+    print("[Ollama] Daemon not running, launching in background...", flush=True)
+    try:
+        import subprocess
+        ollama_bin = "ollama"
+        prog_path = os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")
+        if os.path.exists(prog_path):
+            ollama_bin = prog_path
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        subprocess.Popen(
+            [ollama_bin, "serve"],
+            creationflags=creationflags,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        for _ in range(8):
+            time.sleep(0.5)
+            try:
+                ollama.list()
+                print("[Ollama] Daemon started successfully.", flush=True)
+                return True
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[Ollama] Could not auto-start daemon: {e}", flush=True)
+    return False
+
+
 def poll_ollama_models():
     """Returns the list of models currently available in the local Ollama."""
+    ensure_ollama_running()
     try:
         resp = ollama.list()
         data = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
