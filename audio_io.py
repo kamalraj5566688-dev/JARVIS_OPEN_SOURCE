@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pyttsx3
 
@@ -30,7 +31,8 @@ class SpeechEngine:
         self.whisper_model = None
         try:
             from faster_whisper import WhisperModel
-            self.whisper_model = WhisperModel(model_size, device=device, compute_type=compute_type)
+            hf_hub = os.environ.get("HF_HUB_CACHE", "E:/.cache/huggingface/hub")
+            self.whisper_model = WhisperModel(model_size, download_root=hf_hub, device=device, compute_type=compute_type)
         except Exception as e:
             print(f"[Warning] Could not initialize faster_whisper: {e}")
 
