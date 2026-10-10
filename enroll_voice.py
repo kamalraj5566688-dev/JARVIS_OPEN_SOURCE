@@ -13,9 +13,17 @@ Run this BEFORE starting the assistant. Speak in a normal, natural tone -
 the same way you would talk to Jaddu during the day.
 """
 
-import argparse
+import os
 import sys
+import subprocess
 
+# Auto-delegate to local .venv if launched via global python
+if sys.prefix == sys.base_prefix:
+    venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "Scripts", "python.exe")
+    if os.path.exists(venv_py) and os.path.normpath(sys.executable).lower() != os.path.normpath(venv_py).lower():
+        sys.exit(subprocess.run([venv_py] + sys.argv).returncode)
+
+import argparse
 import numpy as np
 import sounddevice as sd
 
