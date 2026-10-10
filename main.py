@@ -16,6 +16,7 @@ from overlay import start_overlay
 from speaker_verifier import SpeakerVerifier
 from jarvis_memory import JarvisMemory
 from trace_logger import TraceLogger
+from auto_trainer import auto_trainer
 
 # ----------------- Configuration & Audio Setup -----------------
 SAMPLE_RATE = 16000
@@ -279,6 +280,22 @@ TOOLS = [
                 "required": ["mode_name"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "learning_status",
+            "description": "Reports the autonomous self-training and continual learning progress, cycles, and traces count.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trigger_self_training",
+            "description": "Triggers an immediate autonomous background fine-tuning cycle on the local GPU.",
+            "parameters": {"type": "object", "properties": {}}
+        }
     }
 ]
 
@@ -446,6 +463,10 @@ def execute_intent(command: str) -> str:
 def _fallback_intent(command: str) -> str:
     """Matches common desktop commands directly if Ollama is unreachable."""
     cmd = command.lower().strip()
+    if any(k in cmd for k in ["learning status", "training status", "how much trained", "auto train"]):
+        return DesktopController.learning_status()
+    if any(k in cmd for k in ["train yourself", "start training", "trigger training", "self train"]):
+        return DesktopController.trigger_self_training()
     if any(k in cmd for k in ["briefing", "morning briefing", "system report"]):
         return DesktopController.system_briefing()
     if any(k in cmd for k in ["status", "system", "battery", "cpu", "ram"]):
@@ -588,6 +609,9 @@ def handle_wake(wake_audio: bytes, ui_pill):
     speech_engine.speak(response_text)
     ui_pill.set_state("IDLE")
     _drain_queue()
+
+    # Autonomous self-training check after speech turn
+    auto_trainer.on_interaction(voice_notifier=speech_engine)
 
 
 def main():

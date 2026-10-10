@@ -309,15 +309,22 @@ def train_qlora_adapter(
         trust_remote_code=True
     )
 
-    # Configure LoRA hyperparameters
-    peft_config = LoraConfig(
-        task_type=TaskType.CAUSAL_LM,
-        r=8,
-        lora_alpha=16,
-        lora_dropout=0.05,
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"]
-    )
-    model = get_peft_model(model, peft_config)
+    # Continual Learning: Load existing adapter if available, otherwise initialize new LoRA
+    existing_adapter_file = os.path.join(output_dir, "adapter_model.safetensors")
+    if os.path.exists(existing_adapter_file):
+        print(f"[+] Found existing trained adapter in '{output_dir}'.")
+        print("[+] Loading existing adapter for incremental continual learning...")
+        from peft import PeftModel  # type: ignore
+        model = PeftModel.from_pretrained(model, output_dir, is_trainable=True)
+    else:
+        peft_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            r=8,
+            lora_alpha=16,
+            lora_dropout=0.05,
+            target_modules=["q_proj", "v_proj", "k_proj", "o_proj"]
+        )
+        model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
     # Load and format dataset

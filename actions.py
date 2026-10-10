@@ -15,6 +15,21 @@ pyautogui.FAILSAFE = True
 
 class DesktopController:
     @staticmethod
+    def learning_status() -> str:
+        """Reports autonomous self-training and continual learning status."""
+        from auto_trainer import auto_trainer
+        return auto_trainer.get_status_summary()
+
+    @staticmethod
+    def trigger_self_training() -> str:
+        """Triggers an autonomous background fine-tuning cycle immediately."""
+        from auto_trainer import auto_trainer
+        success = auto_trainer.trigger_background_training()
+        if success:
+            return "Autonomous self-training cycle initiated in the background, sir. I will notify you upon completion."
+        return "An autonomous training cycle is already in progress, sir."
+
+    @staticmethod
     def remember_fact(fact_key: str, fact_value: str) -> str:
         """Stores a persistent fact or preference in Jarvis's long-term memory."""
         memory = JarvisMemory()

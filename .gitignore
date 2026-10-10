@@ -54,6 +54,7 @@ voice_profile.npy
 jarvis_memory.json
 traces.jsonl
 dataset_jarvis_sft.json
+training_state.json
 
 # Operating System & IDE files
 .DS_Store
