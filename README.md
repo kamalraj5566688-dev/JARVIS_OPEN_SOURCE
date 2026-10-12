@@ -254,7 +254,6 @@ This project is open-source under the [MIT License](LICENSE).
 
 ## 👤 Author
 
-**Kamal Raj**
-
-- GitHub: [@kamalraj5566688-dev](https://github.com/kamalraj5566688-dev)
-- Repository: [JARVIS_OPEN_SOURCE](https://github.com/kamalraj5566688-dev/JARVIS_OPEN_SOURCE)
+- **Author:** Kamal Raj
+- **GitHub:** [@kamalraj5566688-dev](https://github.com/kamalraj5566688-dev)
+- **Repository:** [JARVIS_OPEN_SOURCE](https://github.com/kamalraj5566688-dev/JARVIS_OPEN_SOURCE)
