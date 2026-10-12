@@ -211,15 +211,18 @@ J.A.R.V.I.S. logs every spoken command, transcription, and tool execution into `
 ```text
 JARVIS_OPEN_SOURCE/
 ├── main.py                     # Central orchestrator loop (wake, VAD, verify, LLM, TTS)
-├── actions.py                  # Universal desktop controller & hardware telemetry
+├── jarvis_brain.py             # Core Cognitive Engine, dynamic system prompt & fast reflex fallback
+├── actions.py                  # Universal desktop controller, hardware telemetry & offline gates
 ├── audio_io.py                 # Text-To-Speech (pyttsx3) & Speech-To-Text (faster-whisper)
 ├── speaker_verifier.py         # Resemblyzer acoustic voice biometrics engine
 ├── enroll_voice.py             # CLI tool to record owner voice profile
-├── jarvis_memory.py            # OpenJarvis persistent long-term memory engine
+├── jarvis_memory.py            # OpenJarvis atomic persistent long-term memory engine
 ├── trace_logger.py             # OpenJarvis interaction trace collector
+├── auto_trainer.py             # Autonomous continuous learning & background fine-tuning daemon
 ├── train_jarvis.py             # SFT dataset compiler & QLoRA fine-tuning pipeline
 ├── jarvis.modelfile            # Ollama definition for J.A.R.V.I.S. persona
 ├── overlay.py                  # Tkinter floating HUD status pill
+├── test_offline_suite.py       # Comprehensive 33-test automated offline verification suite
 ├── setup_models.py             # Automated offline Vosk model downloader
 ├── requirements.txt            # Core runtime dependencies
 ├── requirements-training.txt   # Optional GPU fine-tuning dependencies

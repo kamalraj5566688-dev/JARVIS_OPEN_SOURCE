@@ -1,4 +1,5 @@
 import os
+import re
 import numpy as np
 import pyttsx3
 from dotenv import load_dotenv
@@ -48,7 +49,14 @@ class SpeechEngine:
             hf_hub = os.environ.get("HF_HUB_CACHE", r"E:\.cache\huggingface\hub")
             if not os.path.exists(hf_hub):
                 hf_hub = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
-            self.whisper_model = WhisperModel(model_size, download_root=hf_hub, device=device, compute_type=compute_type)
+            try:
+                self.whisper_model = WhisperModel(
+                    model_size, download_root=hf_hub, device=device, compute_type=compute_type, local_files_only=True
+                )
+            except Exception:
+                self.whisper_model = WhisperModel(
+                    model_size, download_root=hf_hub, device=device, compute_type=compute_type
+                )
         except Exception as e:
             print(f"[Warning] Could not initialize faster_whisper: {e}")
 
@@ -73,14 +81,30 @@ class SpeechEngine:
             segments, _ = self.whisper_model.transcribe(
                 audio_np,
                 beam_size=5,
+                language="en",
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=400),
                 initial_prompt=(
-                    "J.A.R.V.I.S. desktop assistant. Commands: launch VS Code, Chrome, Terminal, Notepad, "
-                    "system briefing, system status, battery, CPU, RAM, volume up, volume down, mute, screenshot, "
-                    "minimize, lock, coding mode, break mode, remember that."
+                    "Jarvis AI assistant. Commands: launch VS Code, Chrome, Terminal, Notepad, Spotify, "
+                    "what is the time, what is today's date, weather in London, play music on YouTube, "
+                    "system briefing, system status, battery level, CPU, RAM, volume up, volume down, mute, "
+                    "take a screenshot, minimize window, lock workstation, coding mode, break mode, remember that."
                 )
             )
-            text = " ".join([segment.text for segment in segments]).strip()
-            return text
+            raw_text = " ".join([segment.text for segment in segments]).strip()
+
+            # Filter known Whisper phantom hallucination artifacts
+            hallucinations = [
+                "thank you for watching", "thanks for watching", "please subscribe", 
+                "like and subscribe", "subtitles by", "[music]", "(music)", 
+                "[applause]", "(bell chime)", "you"
+            ]
+            clean = raw_text.strip()
+            for h in hallucinations:
+                if clean.lower() == h:
+                    return ""
+                clean = re.sub(re.escape(h), "", clean, flags=re.IGNORECASE).strip()
+            return clean
         except Exception as e:
             print(f"[Transcribe Error]: {e}", flush=True)
             return ""

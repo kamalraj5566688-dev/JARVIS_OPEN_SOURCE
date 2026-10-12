@@ -42,6 +42,7 @@ from overlay import start_overlay
 from jarvis_memory import JarvisMemory
 from trace_logger import TraceLogger
 from auto_trainer import auto_trainer
+from jarvis_brain import jarvis_brain
 
 # ----------------- Configuration & Audio Setup -----------------
 SAMPLE_RATE = 16000
@@ -414,166 +415,22 @@ conversation_history = deque(maxlen=6)
 
 
 def execute_intent(command: str) -> str:
-    """Routes a command through the local LLM with persistent memory, tool execution, and trace logging."""
-    start_time = time.time()
-    
-    # Inject OpenJarvis Persistent Memory
-    memory_context = memory.build_system_context()
-
-    system_prompt = (
-        "You are J.A.R.V.I.S., the ultra-competent desktop AI assistant inspired by Tony Stark's system.\n"
-        "PERSONALITY: Cultured, articulate, calm, loyal, and subtly witty. Address the user respectfully as 'Sir' (or their designated name).\n"
-        "BREVITY: You are a spoken voice assistant. Keep verbal responses strictly to 1-2 crisp, elegant sentences.\n"
-        "TOOLS: Always invoke the matching tool for desktop actions (launching apps, media control, websites, windows, system telemetry, screenshots, macros, memory storage, or shell commands).\n"
-        f"{memory_context}"
-    )
-
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(list(conversation_history))
-    messages.append({"role": "user", "content": command})
-
-    tool_used = None
-    tool_args = None
-    tool_output = None
-
+    """Routes a command through the JarvisBrain cognitive and tool engine with error recovery."""
+    jarvis_brain.model_name = ACTIVE_OLLAMA_MODEL
+    jarvis_brain.ollama_host = OLLAMA_HOST
     try:
-        response = ollama.chat(
-            model=ACTIVE_OLLAMA_MODEL,
-            messages=messages,
-            tools=TOOLS,
-            options={"temperature": 0.2, "num_ctx": 4096, "num_predict": 100},
-        )
-
-        data = response.model_dump() if hasattr(response, "model_dump") else dict(response)
-        message = data.get("message", {})
-
-        # Tool detection
-        tool_call_info = None
-        tool_calls = message.get("tool_calls") or []
-        if tool_calls:
-            tc = tool_calls[0]
-            func_name = (tc.get("function") or {}).get("name")
-            raw_args = (tc.get("function") or {}).get("arguments") or {}
-            if isinstance(raw_args, str):
-                try:
-                    raw_args = json.loads(raw_args)
-                except json.JSONDecodeError:
-                    raw_args = {}
-            if func_name:
-                tool_call_info = (func_name, raw_args)
-
-        if tool_call_info is None:
-            tool_call_info = _parse_tool_call(message.get("content", ""))
-
-        if tool_call_info:
-            func_name, args = tool_call_info
-            tool_used = func_name
-            tool_args = args
-            print(f"[Tool Triggered]: {func_name}({args})", flush=True)
-
-            func = getattr(DesktopController, func_name, None)
-            if func:
-                result = func(**args)
-                tool_output = result
-                conversation_history.append({"role": "user", "content": command})
-                conversation_history.append({"role": "assistant", "content": result})
-                
-                # Save to persistent memory & trace logger
-                memory.record_turn(command, result, tool_used)
-                latency = (time.time() - start_time) * 1000
-                trace_logger.log_interaction(
-                    query=command,
-                    response=result,
-                    tool_called=tool_used,
-                    tool_args=tool_args,
-                    tool_output=tool_output,
-                    latency_ms=latency,
-                    model_name=ACTIVE_OLLAMA_MODEL,
-                    success=True
-                )
-                return result
-            return "Command execution method could not be found, sir."
-
-        content = (message.get("content") or "").strip()
-        final_reply = content or "I am listening, sir, but did not catch your intent."
-        conversation_history.append({"role": "user", "content": command})
-        conversation_history.append({"role": "assistant", "content": final_reply})
-        
-        # Save to persistent memory & trace logger
-        memory.record_turn(command, final_reply)
-        latency = (time.time() - start_time) * 1000
-        trace_logger.log_interaction(
-            query=command,
-            response=final_reply,
-            latency_ms=latency,
-            model_name=ACTIVE_OLLAMA_MODEL,
-            success=True
-        )
-        return final_reply
-
+        return jarvis_brain.process_query(command)
     except Exception as e:
-        print(f"[Ollama] LLM call unavailable ({e}), trying desktop fallback...", flush=True)
-        fallback = _fallback_intent(command)
+        print(f"[Main Warning] Error processing query via brain: {e}. Executing heuristic fallback...", flush=True)
+        fallback = jarvis_brain.fast_heuristic_fallback(command)
         if fallback:
-            conversation_history.append({"role": "user", "content": command})
-            conversation_history.append({"role": "assistant", "content": fallback})
-            memory.record_turn(command, fallback)
-            latency = (time.time() - start_time) * 1000
-            trace_logger.log_interaction(
-                query=command,
-                response=fallback,
-                latency_ms=latency,
-                model_name="desktop_fallback",
-                success=True
-            )
             return fallback
-        return "The local intelligence engine is currently offline, sir. Please start Ollama."
+        return f"I encountered an error executing that request, sir: {str(e)}"
 
 
 def _fallback_intent(command: str) -> str:
-    """Matches common desktop commands directly if Ollama is unreachable."""
-    cmd = command.lower().strip()
-    if any(k in cmd for k in ["learning status", "training status", "how much trained", "auto train"]):
-        return DesktopController.learning_status()
-    if any(k in cmd for k in ["train yourself", "start training", "trigger training", "self train"]):
-        return DesktopController.trigger_self_training()
-    if any(k in cmd for k in ["briefing", "morning briefing", "system report"]):
-        return DesktopController.system_briefing()
-    if any(k in cmd for k in ["status", "system", "battery", "cpu", "ram"]):
-        return DesktopController.system_status()
-    if any(k in cmd for k in ["screenshot", "screen shot"]):
-        return DesktopController.take_screenshot()
-    if any(k in cmd for k in ["vs code", "vscode", "code"]):
-        return DesktopController.launch_app("vscode")
-    if any(k in cmd for k in ["chrome", "google chrome", "browser"]):
-        return DesktopController.launch_app("chrome")
-    if any(k in cmd for k in ["terminal", "powershell", "cmd"]):
-        return DesktopController.launch_app("terminal")
-    if any(k in cmd for k in ["notepad"]):
-        return DesktopController.launch_app("notepad")
-    if any(k in cmd for k in ["spotify"]):
-        return DesktopController.launch_app("spotify")
-    if any(k in cmd for k in ["mute", "unmute"]):
-        return DesktopController.media_control("mute")
-    if any(k in cmd for k in ["volume up", "increase volume", "louder"]):
-        return DesktopController.media_control("up")
-    if any(k in cmd for k in ["volume down", "lower volume", "quieter"]):
-        return DesktopController.media_control("down")
-    if any(k in cmd for k in ["minimize", "hide windows"]):
-        return DesktopController.window_management("minimize")
-    if any(k in cmd for k in ["desktop", "show desktop"]):
-        return DesktopController.window_management("desktop")
-    if any(k in cmd for k in ["lock", "lock pc", "lock workstation"]):
-        return DesktopController.window_management("lock")
-    if any(k in cmd for k in ["coding mode", "dev mode"]):
-        return DesktopController.run_macro("coding")
-    if any(k in cmd for k in ["break mode", "chill mode"]):
-        return DesktopController.run_macro("chill")
-    if "search" in cmd or "google" in cmd:
-        q = cmd.replace("search", "").replace("google", "").replace("for", "").strip()
-        if q:
-            return DesktopController.search_web(q)
-    return ""
+    """Matches desktop commands directly using JarvisBrain's fast heuristic reflex."""
+    return jarvis_brain.fast_heuristic_fallback(command) or ""
 
 
 def _drain_queue():
@@ -726,20 +583,38 @@ def main():
     print("=======================================================\n", flush=True)
 
     # Comprehensive phonetic patterns for "Jarvis" / "Hey Jarvis" / "Jaddu"
+    # Kaldi Indian English acoustic model frequently mishears "Jarvis" in many ways;
+    # all observed misdecodes are listed here to maximise wake detection.
     wake_phonetic_patterns = [
-        # Standard
+        # Standard pronunciations
         "jarvis", "hey jarvis", "hello jarvis", "hi jarvis", "ok jarvis", "okay jarvis",
         "jar vis", "jar visual", "jar base", "jarish", "jarves", "jarvez", "jarv",
-        # Observed Kaldi Indian English phonetic decodings
+        # Common Kaldi Indian English acoustic misdecodes of "Jarvis"
         "service", "services", "surface", "travis", "harvest", "charvis", "jervis",
         "star wars", "jar was", "jar is", "javis", "charles", "justice", "drivers",
         "jersey", "jared", "damage", "device", "diverse", "davis", "chavez", "chaves",
         "javed", "java", "jerry", "charlie", "address",
         "hey service", "hello service", "hey travis", "hey jersey", "hello jersey",
-        # Backward-compatible Jaddu
+        # Additional observed misdecodes from vosk-model-small-en-in-0.4
+        # 'J' onset often decoded as: 'after', 'officer', 'arthur', 'author'
+        # 'arvis' suffix decoded as: 'opening', 'office', 'often'
+        "after", "officer", "arthur", "author", "office",
+        "after opening", "after office", "after often",
+        "hey after", "hello after", "hey officer", "hello officer",
+        "harbour", "harvest", "carve", "garvis", "garb", "karvis",
+        # Backward-compatible Jaddu variants
         "jaddu", "jadu", "judo", "jadoo", "hey jaddu", "hello jaddu", "hi jaddu",
         "hello do", "hello due", "hello dew", "hello judo", "hello dude"
     ]
+
+    # Action verbs that — when found as the FIRST real word in a final Vosk result —
+    # indicate this was a command even if the wake word was completely swallowed.
+    _action_prefixes = {
+        "open", "launch", "start", "play", "show", "check", "get",
+        "take", "search", "find", "run", "close", "minimize", "maximize",
+        "lock", "mute", "unmute", "increase", "decrease", "volume",
+        "remember", "what", "tell", "give", "set", "switch"
+    }
 
     def extract_wake_and_command(text: str):
         """
@@ -765,28 +640,38 @@ def main():
                 after = " ".join(words[idx + 1:]).strip()
                 return True, after
 
-            # Specific common Kaldi decodings
+            # Specific common Kaldi one-word decodings of "Jarvis"
             if w in ["jarvis", "jersey", "jared", "damage", "jervis", "javis",
                      "charvis", "service", "travis", "harvest", "jaddu", "jadu",
-                     "judo", "drivers", "chavez", "davis"]:
+                     "judo", "drivers", "chavez", "davis", "after", "officer",
+                     "arthur", "author", "harbour", "garvis", "karvis"]:
                 after = " ".join(words[idx + 1:]).strip()
                 return True, after
 
-            # Fuzzy string similarity against "jarvis" or "jaddu"
+            # Lowered fuzzy threshold (0.62) to catch more acoustic variants
             sim_jarvis = difflib.SequenceMatcher(None, w, "jarvis").ratio()
-            sim_jaddu = difflib.SequenceMatcher(None, w, "jaddu").ratio()
-            if sim_jarvis >= 0.72 or sim_jaddu >= 0.72:
+            sim_jaddu  = difflib.SequenceMatcher(None, w, "jaddu").ratio()
+            if sim_jarvis >= 0.62 or sim_jaddu >= 0.62:
                 after = " ".join(words[idx + 1:]).strip()
                 return True, after
 
-        # Short greetings (1-2 words): "hello jarvis", "hey jarvis", etc.
+        # Short greetings (1-3 words): "hello jarvis", "hey jarvis", etc.
         if 1 <= len(words) <= 3 and words[0] in ["hello", "hey", "hi", "halo", "ok", "okay"]:
             if len(words) >= 2:
                 w2 = words[1]
-                if (difflib.SequenceMatcher(None, w2, "jarvis").ratio() >= 0.65 or
-                        w2.startswith("j") or w2 in ["service", "travis", "jersey", "jared"]):
+                if (difflib.SequenceMatcher(None, w2, "jarvis").ratio() >= 0.60 or
+                        w2.startswith("j") or
+                        w2 in ["service", "travis", "jersey", "jared",
+                               "after", "officer", "arthur", "author"]):
                     after = " ".join(words[2:]).strip()
                     return True, after
+
+        # LAST-RESORT: If the FINAL Vosk result (≤10 words) begins with a clear
+        # action verb and no wake word was detected above, treat the whole
+        # utterance as the command. This catches cases where the acoustic model
+        # completely swallowed the wake-word prefix.
+        if words and words[0] in _action_prefixes and len(words) <= 10:
+            return True, t
 
         return False, ""
 

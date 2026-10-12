@@ -17,6 +17,7 @@ import os
 import sys
 import json
 import argparse
+import subprocess
 from typing import List, Dict, Any
 
 from trace_logger import TraceLogger
@@ -295,19 +296,32 @@ def train_qlora_adapter(
     except Exception:
         pass
 
-    print(f"[+] Loading Tokenizer & Model: {base_model_name} (resuming existing downloads if any)...")
-    tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True)
+    print(f"[+] Loading Tokenizer & Model: {base_model_name} (checking local cache first)...")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True, local_files_only=True)
+    except Exception:
+        tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True)
+
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     # Load in 4-bit / fp16 for RTX 3050 4GB memory safety
     torch_dtype = torch.float16 if device == "cuda" else torch.float32
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model_name,
-        torch_dtype=torch_dtype,
-        device_map="auto" if device == "cuda" else None,
-        trust_remote_code=True
-    )
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            base_model_name,
+            torch_dtype=torch_dtype,
+            device_map="auto" if device == "cuda" else None,
+            trust_remote_code=True,
+            local_files_only=True
+        )
+    except Exception:
+        model = AutoModelForCausalLM.from_pretrained(
+            base_model_name,
+            torch_dtype=torch_dtype,
+            device_map="auto" if device == "cuda" else None,
+            trust_remote_code=True
+        )
 
     # Continual Learning: Load existing adapter if available, otherwise initialize new LoRA
     existing_adapter_file = os.path.join(output_dir, "adapter_model.safetensors")
@@ -381,20 +395,32 @@ def train_qlora_adapter(
     return True
 
 
-def deploy_to_ollama(model_name: str = "jarvis"):
-    """Creates/updates the local 'jarvis' model inside Ollama using jarvis.modelfile."""
+def deploy_to_ollama(model_name: str = "jarvis") -> bool:
+    """Creates/updates the local 'jarvis' model inside Ollama using jarvis.modelfile with verification."""
     modelfile_path = os.path.join(os.path.dirname(__file__), "jarvis.modelfile")
     if not os.path.exists(modelfile_path):
         print(f"[!] Modelfile '{modelfile_path}' does not exist.")
-        return
+        return False
 
     print(f"[Ollama] Compiling model '{model_name}' from '{modelfile_path}'...")
-    cmd = f'ollama create {model_name} -f "{modelfile_path}"'
-    code = os.system(cmd)
-    if code == 0:
-        print(f"\n[+] Success! J.A.R.V.I.S. model is now deployed in Ollama as '{model_name}'.")
-    else:
-        print(f"[!] Failed to compile model in Ollama (exit code {code}). Check if Ollama daemon is running.")
+    try:
+        res = subprocess.run(
+            ["ollama", "create", model_name, "-f", modelfile_path],
+            capture_output=True, text=True, timeout=120
+        )
+        if res.returncode == 0:
+            print(f"\n[+] Success! J.A.R.V.I.S. model is now deployed in Ollama as '{model_name}'.")
+            return True
+        else:
+            err = res.stderr.strip() or res.stdout.strip()
+            print(f"[!] Failed to compile model in Ollama (exit code {res.returncode}): {err}")
+            return False
+    except subprocess.TimeoutExpired:
+        print("[!] Ollama compilation timed out after 120 seconds.")
+        return False
+    except Exception as e:
+        print(f"[!] Error running ollama create: {e}")
+        return False
 
 
 def main():
@@ -410,10 +436,14 @@ def main():
         generate_training_dataset()
 
     if args.all or args.train:
-        train_qlora_adapter()
+        ok = train_qlora_adapter()
+        if not ok:
+            sys.exit(1)
 
     if args.all or args.deploy:
-        deploy_to_ollama()
+        ok = deploy_to_ollama()
+        if not ok:
+            sys.exit(1)
 
     if not (args.generate or args.train or args.deploy or args.all):
         parser.print_help()

@@ -5,13 +5,16 @@
 ## 1. Product Requirements Document (PRD)
 
 ### 1.1 Executive Summary
+
 **Jaddu** is a personal, 100% offline, privacy-first desktop voice assistant for Windows. It is secured by **Speaker Voice Verification (Voice Biometrics)**, ensuring that it responds exclusively to its owner's voice. Jaddu is powered locally by **Ollama** for reasoning and tool calling, **Vosk** for low-latency wake-word spotting ("Hello Jaddu"), **faster-whisper** for speech-to-text, **pyttsx3** for offline vocal feedback, and a desktop automation suite that executes desktop, media, window, hardware, or shell commands on demand.
 
 ### 1.2 Target User & Personas
+
 - **The Owner (Exclusive Primary User):** Requires a dedicated voice assistant that executes personal OS tasks, opens applications, controls media, runs terminal scripts, and reports system health without triggering for family, colleagues, or background chatter.
 - **Privacy & Security Purist:** Demands 100% on-device local execution (via Ollama, Vosk, Whisper, and local voice embeddings) with zero cloud dependencies.
 
 ### 1.3 Key Features & Functional Requirements (FR)
+
 - **FR-1: Wake-Word Detection ("Hello Jaddu"):** Listens continuously in low-power idle mode via Vosk (`vosk-model-small-en-in-0.4`) recognizing "Hello Jaddu" and phonetic variants ("hey jaddu", "jaddu", "jadu").
 - **FR-2: Speaker Voice Recognition & Authentication (Owner Voice Only):**
   - **Voice Enrollment (`enroll_voice.py`):** One-time setup script recording 3 to 5 samples of the owner's voice, extracting acoustic speaker embeddings (via `resemblyzer` or `speechbrain`/ECAPA-TDNN), and persisting an enrolled profile (`voice_profile.npy`).
@@ -43,8 +46,9 @@
 ## 2. Technical Requirements Document (TRD)
 
 ### 2.1 Technology Stack
+
 | Subsystem | Technology | Configuration / Version | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **Audio Ingestion** | `sounddevice` | 16 kHz, Mono, 16-bit PCM, 250ms chunks (`blocksize=4000`) | Non-blocking microphone stream |
 | **Wake-Word Engine** | `vosk` + Kaldi | `vosk-model-small-en-in-0.4` | Keyword spotting for "Hello Jaddu" |
 | **Voice Biometrics** | `resemblyzer` or `speechbrain` | Cosine similarity against `voice_profile.npy` | Speaker verification (Authorized owner only) |
@@ -55,6 +59,7 @@
 | **Floating UI HUD** | `tkinter` | Top-most canvas, `-transparentcolor`, borderless | Visual state display |
 
 ### 2.2 System Modules & File Responsibilities
+
 1. `main.py`: Central orchestrator loop. Listens for "Hello Jaddu", triggers speaker verification, captures speech, dispatches to Ollama, executes tools, and sends TTS response.
 2. `speaker_verifier.py`: Encapsulates `SpeakerVerifier` class. Extracts speaker embeddings from raw PCM audio and calculates cosine similarity against enrolled `voice_profile.npy`.
 3. `enroll_voice.py`: Standalone CLI tool to guide the owner through recording 3-5 speech samples and save the enrolled profile `voice_profile.npy`.
@@ -64,9 +69,11 @@
 7. `models/`: Contains Vosk model directory and local profile assets.
 
 ### 2.3 Ollama Integration Specification
+
 - Ollama endpoint: `http://localhost:11434`
 - Default model: `qwen2.5:1.5b` (or `llama3.2:1b` / `llama3.2:3b`)
 - Client invocation:
+
 ```python
 import ollama
 
@@ -79,6 +86,7 @@ response = ollama.chat(
     tools=TOOLS
 )
 ```
+
 - Tool parser checks for `response.get("message", {}).get("tool_calls")` and falls back to JSON extraction if outputted in content.
 
 ---
@@ -86,6 +94,7 @@ response = ollama.chat(
 ## 3. Architecture & Flow
 
 ### 3.1 State Machine Diagram
+
 ```mermaid
 stateDiagram-v2
     [*] --> IDLE
@@ -105,6 +114,7 @@ stateDiagram-v2
 ```
 
 ### 3.2 End-to-End Sequence Diagram
+
 ```mermaid
 sequenceDiagram
     autonumber

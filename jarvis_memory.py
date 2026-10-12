@@ -58,12 +58,22 @@ class JarvisMemory:
                 print(f"[Memory] Warning: Could not read memory file ({e}). Initializing defaults.")
         return DEFAULT_MEMORY.copy()
 
-    def save(self) -> None:
+    def save(self) -> bool:
+        """Atomically saves memory data to disk and verifies write."""
+        tmp_path = f"{self.memory_path}.tmp"
         try:
-            with open(self.memory_path, "w", encoding="utf-8") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, self.memory_path)
+            return True
         except Exception as e:
             print(f"[Memory] Error saving persistent memory: {e}")
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+            return False
 
     # ---------------- Fact & Preference Management ----------------
 
@@ -71,22 +81,26 @@ class JarvisMemory:
         return self.data.get("facts", {}).get(key.lower(), default)
 
     def set_fact(self, key: str, value: Any) -> str:
-        """Stores or updates a long-term fact."""
+        """Stores or updates a long-term fact with persistence verification."""
         clean_key = key.strip().lower()
+        if not clean_key:
+            return "Fact key cannot be empty, sir."
         if "facts" not in self.data:
             self.data["facts"] = {}
         self.data["facts"][clean_key] = value
-        self.save()
-        return f"I have committed '{key}' to permanent memory, sir."
+        saved = self.save()
+        if saved and self.get_fact(clean_key) == value:
+            return f"I have committed '{key}' to permanent memory, sir."
+        return f"Failed to commit '{key}' to permanent memory due to a storage failure, sir."
 
     def get_user_name(self) -> str:
         return self.data.get("user_profile", {}).get("name", "Sir")
 
-    def set_user_name(self, name: str) -> None:
+    def set_user_name(self, name: str) -> bool:
         if "user_profile" not in self.data:
             self.data["user_profile"] = {}
         self.data["user_profile"]["name"] = name.strip()
-        self.save()
+        return self.save()
 
     # ---------------- Interaction Logging ----------------
 

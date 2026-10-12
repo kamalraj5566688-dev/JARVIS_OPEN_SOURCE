@@ -71,10 +71,18 @@ class JarvisAutoTrainer:
         new_traces = max(0, current_traces - last_count)
         remaining = max(0, self.threshold - new_traces)
         cycles = self.state.get("total_cycles", 0)
+        status = self.state.get("status", "idle")
 
         if self.is_training:
-            return f"I am currently running an autonomous fine-tuning cycle in the background, sir."
-        
+            return "I am currently running an autonomous fine-tuning cycle in the background, sir."
+
+        if isinstance(status, str) and status.startswith("error:"):
+            err_msg = status[6:].strip()
+            return (
+                f"Autonomous learning encountered an issue during the previous run: {err_msg}. "
+                f"{cycles} cycles completed so far with {new_traces} new traces logged, sir."
+            )
+
         return (
             f"Autonomous learning is active, sir. I have completed {cycles} evolution cycles. "
             f"I have logged {new_traces} new interaction traces, and will automatically trigger the next "
@@ -116,7 +124,7 @@ class JarvisAutoTrainer:
         return True
 
     def _run_training_pipeline(self, voice_notifier: Optional[Any] = None) -> None:
-        """Internal worker executing dataset generation, LoRA fine-tuning, and deployment."""
+        """Internal worker executing dataset generation, LoRA fine-tuning, and deployment with timeouts."""
         try:
             start_time = time.time()
             current_traces = self._count_current_traces()
@@ -127,16 +135,24 @@ class JarvisAutoTrainer:
             if not os.path.exists(python_exe):
                 python_exe = "python"
 
-            # 1. Regenerate training dataset
-            subprocess.run([python_exe, script_path, "--generate"], check=True)
+            # 1. Regenerate training dataset (max 2 minutes timeout)
+            res_gen = subprocess.run([python_exe, script_path, "--generate"], capture_output=True, text=True, timeout=120)
+            if res_gen.returncode != 0:
+                err_detail = res_gen.stderr.strip() or res_gen.stdout.strip() or f"exit code {res_gen.returncode}"
+                raise RuntimeError(f"Dataset generation failed: {err_detail[:150]}")
 
             print("[AutoTrainer] === Phase 2: Autonomous LoRA Fine-Tuning ===", flush=True)
-            # 2. Run LoRA fine-tuning
-            subprocess.run([python_exe, script_path, "--train"], check=True)
+            # 2. Run LoRA fine-tuning (max 15 minutes timeout)
+            res_train = subprocess.run([python_exe, script_path, "--train"], capture_output=True, text=True, timeout=900)
+            if res_train.returncode != 0:
+                err_detail = res_train.stderr.strip() or res_train.stdout.strip() or f"exit code {res_train.returncode}"
+                raise RuntimeError(f"LoRA fine-tuning failed: {err_detail[:150]}")
 
             print("[AutoTrainer] === Phase 3: Hot-Deploying Model to Ollama ===", flush=True)
-            # 3. Deploy updated weights
-            subprocess.run([python_exe, script_path, "--deploy"], check=False)
+            # 3. Deploy updated weights (max 3 minutes timeout)
+            res_deploy = subprocess.run([python_exe, script_path, "--deploy"], capture_output=True, text=True, timeout=180)
+            if res_deploy.returncode != 0:
+                print(f"[AutoTrainer] Warning: Deployment returned non-zero code ({res_deploy.returncode}).")
 
             duration_min = (time.time() - start_time) / 60.0
             cycles = self.state.get("total_cycles", 0) + 1
@@ -164,6 +180,11 @@ class JarvisAutoTrainer:
                     )
                 except Exception:
                     pass
+
+        except subprocess.TimeoutExpired as te:
+            print(f"[AutoTrainer] [!] Training phase timed out: {te}", flush=True)
+            self.state["status"] = f"error: training phase timed out ({te})"
+            self._save_state()
 
         except Exception as e:
             print(f"[AutoTrainer] [!] Error during background self-training: {e}", flush=True)
