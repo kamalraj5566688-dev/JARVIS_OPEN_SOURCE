@@ -1,18 +1,12 @@
 # J.A.R.V.I.S. — Open Source Offline Voice AI Assistant
 
-<div align="center">
-
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue?logo=python)
 ![Privacy](https://img.shields.io/badge/Privacy-100%25%20Offline-green?logo=shield)
 ![Biometrics](https://img.shields.io/badge/Security-Voice%20Biometrics-red?logo=fingerprint)
 ![Architecture](https://img.shields.io/badge/Architecture-OpenJarvis%20Compliant-purple)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-<p align="center">
-  <b>A 100% local, privacy-first personal desktop AI assistant inspired by Iron Man's J.A.R.V.I.S. and Stanford's OpenJarvis architecture.</b>
-</p>
-
-</div>
+**A 100% local, privacy-first personal desktop AI assistant inspired by Iron Man's J.A.R.V.I.S. and Stanford's OpenJarvis architecture.**
 
 ---
 
@@ -142,6 +136,7 @@ To secure Jarvis so it responds **only to your voice**, run the enrollment tool 
 ```powershell
 python enroll_voice.py
 ```
+
 > This creates your encrypted local biometric profile: `voice_profile.npy`.
 
 ### 6. Compile the J.A.R.V.I.S. Ollama Model
@@ -154,7 +149,7 @@ ollama create jarvis -f jarvis.modelfile
 
 ---
 
-## 🎮 Running J.A.R.V.I.S.
+## 🎮 Running J.A.R.V.I.S
 
 Launch the assistant:
 
@@ -192,14 +187,19 @@ python main.py
 J.A.R.V.I.S. logs every spoken command, transcription, and tool execution into `traces.jsonl`. You can continuously train and adapt your model:
 
 1. **Compile your usage traces into an SFT dataset:**
+
    ```powershell
    python train_jarvis.py --generate
    ```
+
 2. **Fine-tune the QLoRA adapter on your GPU:**
+
    ```powershell
    python train_jarvis.py --train
    ```
+
 3. **Deploy the updated model to Ollama:**
+
    ```powershell
    python train_jarvis.py --deploy
    ```
@@ -254,6 +254,7 @@ This project is open-source under the [MIT License](LICENSE).
 
 ## 👤 Author
 
-**Kamal Raj**  
+**Kamal Raj**
+
 - GitHub: [@kamalraj5566688-dev](https://github.com/kamalraj5566688-dev)
 - Repository: [JARVIS_OPEN_SOURCE](https://github.com/kamalraj5566688-dev/JARVIS_OPEN_SOURCE)
