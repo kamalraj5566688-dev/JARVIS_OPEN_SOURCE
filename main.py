@@ -8,10 +8,25 @@ if sys.prefix == sys.base_prefix:
     if os.path.exists(venv_py) and os.path.normpath(sys.executable).lower() != os.path.normpath(venv_py).lower():
         sys.exit(subprocess.run([venv_py] + sys.argv).returncode)
 
+# Load environment configuration (.env)
+from dotenv import load_dotenv
+_base_dir = os.path.dirname(os.path.abspath(__file__))
+_env_path = os.path.join(_base_dir, ".env")
+if os.path.exists(_env_path):
+    load_dotenv(_env_path)
+
+# Configure Hugging Face and Ollama environment paths
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+if "HF_HOME" not in os.environ and os.path.exists(r"E:\.cache\huggingface"):
+    os.environ["HF_HOME"] = r"E:\.cache\huggingface"
+if "HF_HUB_CACHE" not in os.environ and os.path.exists(r"E:\.cache\huggingface\hub"):
+    os.environ["HF_HUB_CACHE"] = r"E:\.cache\huggingface\hub"
+
 import json
 import queue
 import re
 import time
+import difflib
 from collections import deque
 
 import numpy as np
@@ -24,7 +39,6 @@ import msvcrt
 from audio_io import SpeechEngine
 from actions import DesktopController
 from overlay import start_overlay
-from speaker_verifier import SpeakerVerifier
 from jarvis_memory import JarvisMemory
 from trace_logger import TraceLogger
 from auto_trainer import auto_trainer
@@ -32,8 +46,9 @@ from auto_trainer import auto_trainer
 # ----------------- Configuration & Audio Setup -----------------
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 4000  # 250ms audio blocks
-VOICE_PROFILE_PATH = "voice_profile.npy"
-VERIFY_THRESHOLD = float(os.environ.get("JARVIS_VERIFY_THRESHOLD", "0.62"))
+# Voice authentication is DISABLED for open public use (anyone can speak)
+VOICE_AUTH_ENABLED = os.environ.get("JARVIS_REQUIRE_VOICE_AUTH", "0").strip() in ("1", "true", "True")
+
 OLLAMA_HOST = os.environ.get("JARVIS_OLLAMA_HOST", os.environ.get("JADDU_OLLAMA_HOST", "http://localhost:11434"))
 OLLAMA_MODEL = os.environ.get("JARVIS_OLLAMA_MODEL", "jarvis")
 OLLAMA_MODEL_PREFERENCE = [
@@ -41,23 +56,28 @@ OLLAMA_MODEL_PREFERENCE = [
     "qwen2.5", "llama3.2", "llama3.1", "mistral", "gemma"
 ]
 
-print("Loading wake word engine (Vosk)...")
-vosk_model = VoskModel("models/vosk-model-small-en-in-0.4")
+print("Loading wake word engine (Vosk Indian English)...")
+vosk_model_path = os.path.join(_base_dir, "models", "vosk-model-small-en-in-0.4")
+if not os.path.exists(vosk_model_path):
+    vosk_model_path = "models/vosk-model-small-en-in-0.4"
+vosk_model = VoskModel(vosk_model_path)
 rec = KaldiRecognizer(vosk_model, SAMPLE_RATE)
 
-print("Initializing Speech-to-Text engine (Whisper)...")
+print("Initializing Speech-to-Text engine (faster-whisper)...")
 speech_engine = SpeechEngine(model_size="base.en", device="cpu", compute_type="int8")
 
-print("Initializing Speaker Verifier (voice biometrics)...")
-speaker = SpeakerVerifier(profile_path=VOICE_PROFILE_PATH, threshold=VERIFY_THRESHOLD)
-speaker.threshold = VERIFY_THRESHOLD
-if not speaker.profile_exists:
-    print(f"[!] No voice profile found at '{VOICE_PROFILE_PATH}'.")
-    print(f"[!] Run `python enroll_voice.py` to enroll your voice.")
+# Optional voice verifier (only active if user explicitly configures JARVIS_REQUIRE_VOICE_AUTH=1)
+speaker = None
+if VOICE_AUTH_ENABLED:
+    try:
+        from speaker_verifier import SpeakerVerifier
+        speaker = SpeakerVerifier(profile_path="voice_profile.npy")
+        print("[+] Voice authentication enabled.")
+    except Exception as e:
+        print(f"[!] Voice verifier unavailable: {e}. Defaulting to open mode.")
+        VOICE_AUTH_ENABLED = False
 else:
-    print(f"[+] Voice profile loaded "
-          f"(samples={speaker.enrollment_metadata.get('n_samples')}, "
-          f"created={speaker.enrollment_metadata.get('created_at')})")
+    print("[+] Public Mode: Voice authentication removed (Ready for everyone).")
 
 print("Initializing OpenJarvis Memory & Trace Logger...")
 memory = JarvisMemory()
@@ -67,7 +87,6 @@ audio_queue = queue.Queue()
 
 # ----------------- Ollama (local LLM) setup -----------------
 os.environ["OLLAMA_HOST"] = OLLAMA_HOST
-ollama.host = OLLAMA_HOST
 
 
 def ensure_ollama_running():
@@ -80,7 +99,6 @@ def ensure_ollama_running():
 
     print("[Ollama] Daemon not running, launching in background...", flush=True)
     try:
-        import subprocess
         ollama_bin = "ollama"
         prog_path = os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")
         if os.path.exists(prog_path):
@@ -106,17 +124,22 @@ def ensure_ollama_running():
 
 
 def poll_ollama_models():
-    """Returns the list of models currently available in the local Ollama."""
+    """Returns the list of models currently available in local Ollama."""
     ensure_ollama_running()
     try:
         resp = ollama.list()
         data = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
+        seen = set()
         models = []
         for m in data.get("models", []):
             name = m.get("model") or m.get("name") or ""
-            if name:
-                models.append(name.split(":")[0] if ":" in name and name != "jarvis" else name)
-                models.append(name)
+            if not name:
+                continue
+            base = name.split(":")[0] if ":" in name else name
+            for variant in (base, name):
+                if variant not in seen:
+                    seen.add(variant)
+                    models.append(variant)
         return models
     except Exception as e:
         print(f"[Ollama] Daemon not reachable at {OLLAMA_HOST}: {e}")
@@ -140,7 +163,7 @@ else:
 
 def audio_callback(indata, frames, time_info, status):
     if status:
-        print(f"[Audio Status]: {status}", flush=True)
+        pass
     audio_queue.put(bytes(indata))
 
 
@@ -394,14 +417,14 @@ def execute_intent(command: str) -> str:
     """Routes a command through the local LLM with persistent memory, tool execution, and trace logging."""
     start_time = time.time()
     
-    # 1. Inject OpenJarvis Persistent Memory
+    # Inject OpenJarvis Persistent Memory
     memory_context = memory.build_system_context()
 
     system_prompt = (
-        "You are J.A.R.V.I.S., the user's personal, ultra-competent desktop AI assistant inspired by Tony Stark's system.\n"
-        "PERSONALITY: Cultured, loyal, articulate, calm, and subtly witty. Address the user respectfully as 'Sir' (or their designated name).\n"
+        "You are J.A.R.V.I.S., the ultra-competent desktop AI assistant inspired by Tony Stark's system.\n"
+        "PERSONALITY: Cultured, articulate, calm, loyal, and subtly witty. Address the user respectfully as 'Sir' (or their designated name).\n"
         "BREVITY: You are a spoken voice assistant. Keep verbal responses strictly to 1-2 crisp, elegant sentences.\n"
-        "TOOLS: Always call the matching tool when the user requests desktop actions (apps, media, websites, windows, system telemetry, screenshots, macros, memory storage, or shell commands).\n"
+        "TOOLS: Always invoke the matching tool for desktop actions (launching apps, media control, websites, windows, system telemetry, screenshots, macros, memory storage, or shell commands).\n"
         f"{memory_context}"
     )
 
@@ -412,7 +435,6 @@ def execute_intent(command: str) -> str:
     tool_used = None
     tool_args = None
     tool_output = None
-    success = True
 
     try:
         response = ollama.chat(
@@ -555,7 +577,8 @@ def _fallback_intent(command: str) -> str:
 
 
 def _drain_queue():
-    """Removes all buffered audio frames (used before/after TTS)."""
+    """Removes all buffered audio frames (used before/after TTS to prevent echo)."""
+    time.sleep(0.12)
     while not audio_queue.empty():
         try:
             audio_queue.get_nowait()
@@ -563,47 +586,79 @@ def _drain_queue():
             break
 
 
-def capture_command() -> str:
-    """Captures user spoken command via VAD state machine."""
+def capture_command(existing_audio_prefix: bytes = None) -> str:
+    """
+    Captures user spoken command with dynamic adaptive VAD.
+    Adapts automatically to microphone sensitivity and ambient noise.
+    """
     _drain_queue()
 
-    speech_threshold_rms = 65.0  # sensitive enough for standard laptop/desktop mic (~30-50 ambient)
+    # Dynamic ambient noise estimation
+    ambient_samples = []
+    for _ in range(3):
+        try:
+            sample = audio_queue.get(timeout=0.4)
+            ambient_samples.append(calculate_rms(sample))
+        except queue.Empty:
+            break
+    
+    ambient_rms = float(np.mean(ambient_samples)) if ambient_samples else 35.0
+    # Adaptive threshold: ambient floor + 10, clamped between 42.0 and 75.0
+    speech_threshold_rms = max(42.0, min(75.0, ambient_rms * 1.35 + 8.0))
+
     preroll_buffer = deque(maxlen=4)  # ~1.0s buffer to preserve initial consonant
     recorded_frames = []
-    silence_frames = 0
-    speech_started = False
-    max_wait_frames = 28  # ~7.0s max wait before user starts speaking
-    max_speech_frames = 48  # ~12s max speech length
+    if existing_audio_prefix:
+        recorded_frames.append(existing_audio_prefix)
 
-    print("\n[VAD] Listening for command (speak now)...", flush=True)
+    silence_frames = 0
+    speech_started = len(recorded_frames) > 0
+    max_wait_frames = 32  # ~8.0s max wait before user starts speaking
+    max_speech_frames = 56  # ~14s max command duration
+
+    print(f"\n[VAD] Listening for command... (Ambient: {ambient_rms:.0f}, Speech threshold: {speech_threshold_rms:.0f})", flush=True)
 
     while True:
-        data = audio_queue.get()
+        try:
+            data = audio_queue.get(timeout=1.0)
+        except queue.Empty:
+            break
+
         rms = calculate_rms(data)
 
         if not speech_started:
             preroll_buffer.append(data)
+            # Live volume indicator
+            bar_len = int(min(20, rms // 10))
+            bar = "=" * bar_len + " " * (20 - bar_len)
+            print(f"  [Mic Level]: [{bar}] RMS: {rms:4.0f} / Threshold: {speech_threshold_rms:.0f}  \r", end="", flush=True)
+
             if rms >= speech_threshold_rms:
                 speech_started = True
-                print(f"[VAD] Speech detected (RMS: {rms:.0f}), recording...", flush=True)
+                print(f"\n[VAD] Speech detected (RMS: {rms:.0f}), recording...", flush=True)
                 recorded_frames.extend(preroll_buffer)
             else:
                 max_wait_frames -= 1
                 if max_wait_frames <= 0:
-                    print(f"[VAD] Timed out waiting for speech (ambient RMS: {rms:.0f}).", flush=True)
+                    print(f"\n[VAD] Timed out waiting for speech.", flush=True)
                     break
         else:
             recorded_frames.append(data)
+            bar_len = int(min(20, rms // 10))
+            bar = "#" * bar_len + " " * (20 - bar_len)
+            print(f"  [Recording]: [{bar}] RMS: {rms:4.0f}  \r", end="", flush=True)
+
             if rms < speech_threshold_rms:
                 silence_frames += 1
             else:
                 silence_frames = 0
 
-            if silence_frames >= 4:
-                print(f"[VAD] End of speech detected ({len(recorded_frames) * 0.25:.1f}s captured).", flush=True)
+            # 6 frames of silence (~1.5s) signals end of speech (natural human pause)
+            if silence_frames >= 6:
+                print(f"\n[VAD] End of speech detected ({len(recorded_frames) * 0.25:.1f}s captured).", flush=True)
                 break
             if len(recorded_frames) >= max_speech_frames:
-                print("[VAD] Max command duration reached.", flush=True)
+                print("\n[VAD] Max command duration reached.", flush=True)
                 break
 
     if not recorded_frames:
@@ -615,38 +670,25 @@ def capture_command() -> str:
     return text.strip()
 
 
-def handle_wake(wake_audio, ui_pill):
-    """Full wake interaction flow with voice biometrics, persistent memory, and Jarvis execution."""
-    ui_pill.set_state("VERIFYING")
-
-    # If wake triggered by keyboard or no profile exists, bypass verification
-    if wake_audio is None or not speaker.profile_exists:
-        if wake_audio is not None and not speaker.profile_exists:
-            print("\n[Verify] Note: Running in OPEN mode (no voice profile enrolled).", flush=True)
-        is_owner = True
-    else:
-        is_owner, similarity = speaker.verify(wake_audio)
-        threshold = speaker.threshold
-        print(f"\n[Verify] Similarity: {similarity:.3f} / threshold {threshold:.2f} -> "
-              f"{'ACCEPTED' if is_owner else 'REJECTED'}", flush=True)
-
-        if not is_owner:
-            ui_pill.set_state("REJECTED")
-            speech_engine.speak(
-                "Voice authentication failed, sir. Access is restricted to the enrolled owner."
-            )
-            ui_pill.set_state("IDLE")
-            _drain_queue()
-            return
-
-    # Authorized owner -> prompt and capture command
+def handle_wake(wake_audio, ui_pill, pre_extracted_command: str = ""):
+    """
+    Wake interaction flow: Open public access for everyone!
+    Instantly transitions to LISTENING without biometric rejections.
+    """
     ui_pill.set_state("LISTENING")
-    user_name = memory.get_user_name()
-    speech_engine.speak(f"At your service, {user_name}.")
-    _drain_queue()
 
-    command = capture_command()
-    print(f"[User]: '{command}'", flush=True)
+    # If the user spoke the entire command in one breath (e.g. "Jarvis open Chrome")
+    if pre_extracted_command and len(pre_extracted_command.strip().split()) >= 2:
+        command = pre_extracted_command.strip()
+        print(f"[Direct Command]: '{command}'", flush=True)
+    else:
+        # User called wake word alone -> acknowledge and listen
+        user_name = memory.get_user_name() or "Sir"
+        speech_engine.speak(f"At your service, {user_name}.")
+        _drain_queue()
+
+        command = capture_command()
+        print(f"[User]: '{command}'", flush=True)
 
     if not command or len(command.strip()) == 0:
         response_text = "I didn't catch that, sir. Standing by."
@@ -677,94 +719,130 @@ def main():
 
     print("\n=======================================================", flush=True)
     print(" J.A.R.V.I.S. is Online! (OpenJarvis Architecture)", flush=True)
-    print(" Call 'Jarvis' or 'Hey Jarvis' to activate (or press ENTER in terminal).", flush=True)
-    print(" Owner voice verification is active on your profile.", flush=True)
+    print(" [Public Mode] Ready for everyone - Voice auth removed.", flush=True)
+    print(" Call 'Jarvis' or 'Hey Jarvis' to activate.", flush=True)
+    print(" OR Press [ENTER] / [SPACE] in this terminal anytime!", flush=True)
     print(" Press Ctrl+C in terminal to exit.", flush=True)
     print("=======================================================\n", flush=True)
 
-    # Phonetic patterns recognized by Kaldi for "Jarvis" / "Hey Jarvis" + backward compatible "Jaddu"
+    # Comprehensive phonetic patterns for "Jarvis" / "Hey Jarvis" / "Jaddu"
     wake_phonetic_patterns = [
+        # Standard
         "jarvis", "hey jarvis", "hello jarvis", "hi jarvis", "ok jarvis", "okay jarvis",
-        "jar vis", "service", "travis", "harvest", "charvis", "jervis", "star wars",
-        "jar was", "jar is", "javis", "charles", "justice", "drivers",
-        # Observed Kaldi phonetic decodings for "Jarvis" with Indian accent
-        "jersey", "jared", "damage", "hey jersey", "hello jersey", "hey jared", "hello jared",
-        "hey damage", "hey service", "hello service",
-        # Backward compatible patterns
-        "hello do", "hello due", "hello dew", "hello judo", "hello dude", "hello jaddu",
-        "hello jadu", "hey do", "hey judo", "hey jaddu", "hey jadu", "hi jaddu",
-        "judo", "jaddu", "jadu", "jadoo"
+        "jar vis", "jar visual", "jar base", "jarish", "jarves", "jarvez", "jarv",
+        # Observed Kaldi Indian English phonetic decodings
+        "service", "services", "surface", "travis", "harvest", "charvis", "jervis",
+        "star wars", "jar was", "jar is", "javis", "charles", "justice", "drivers",
+        "jersey", "jared", "damage", "device", "diverse", "davis", "chavez", "chaves",
+        "javed", "java", "jerry", "charlie", "address",
+        "hey service", "hello service", "hey travis", "hey jersey", "hello jersey",
+        # Backward-compatible Jaddu
+        "jaddu", "jadu", "judo", "jadoo", "hey jaddu", "hello jaddu", "hi jaddu",
+        "hello do", "hello due", "hello dew", "hello judo", "hello dude"
     ]
 
-    def is_wake_word(text: str) -> bool:
+    def extract_wake_and_command(text: str):
+        """
+        Detects if text contains a wake word, and extracts any trailing command.
+        Returns (is_wake: bool, trailing_command: str)
+        """
         t = text.lower().strip()
         if not t:
-            return False
-        # Direct pattern match
-        if any(p in t for p in wake_phonetic_patterns):
-            return True
+            return False, ""
+
+        # Direct pattern check
+        for pattern in wake_phonetic_patterns:
+            if pattern in t:
+                # Extract command spoken after the wake word
+                idx = t.find(pattern)
+                after = t[idx + len(pattern):].strip()
+                return True, after
+
         words = t.split()
-        # Word-level phonetic matching
-        for w in words:
-            if w in [
-                "jarvis", "jersey", "jared", "damage", "jervis", "javis",
-                "charvis", "service", "travis", "harvest", "jaddu", "jadu", "judo", "drivers"
-            ]:
-                return True
-            if w.startswith("jar") or w.startswith("jer") or w.startswith("jadd"):
-                return True
-        # Matches any short greeting (1-3 words) starting with hello/hey/hi/ok/okay/jarvis
-        if 1 <= len(words) <= 3 and words[0] in [
-            "hello", "hey", "hi", "halo", "ok", "okay", "jarvis", "jersey", "jared"
-        ]:
-            return True
-        return False
+        for idx, w in enumerate(words):
+            # Prefix matches
+            if w.startswith("jar") or w.startswith("jer") or w.startswith("jadd") or w.startswith("jav"):
+                after = " ".join(words[idx + 1:]).strip()
+                return True, after
+
+            # Specific common Kaldi decodings
+            if w in ["jarvis", "jersey", "jared", "damage", "jervis", "javis",
+                     "charvis", "service", "travis", "harvest", "jaddu", "jadu",
+                     "judo", "drivers", "chavez", "davis"]:
+                after = " ".join(words[idx + 1:]).strip()
+                return True, after
+
+            # Fuzzy string similarity against "jarvis" or "jaddu"
+            sim_jarvis = difflib.SequenceMatcher(None, w, "jarvis").ratio()
+            sim_jaddu = difflib.SequenceMatcher(None, w, "jaddu").ratio()
+            if sim_jarvis >= 0.72 or sim_jaddu >= 0.72:
+                after = " ".join(words[idx + 1:]).strip()
+                return True, after
+
+        # Short greetings (1-2 words): "hello jarvis", "hey jarvis", etc.
+        if 1 <= len(words) <= 3 and words[0] in ["hello", "hey", "hi", "halo", "ok", "okay"]:
+            if len(words) >= 2:
+                w2 = words[1]
+                if (difflib.SequenceMatcher(None, w2, "jarvis").ratio() >= 0.65 or
+                        w2.startswith("j") or w2 in ["service", "travis", "jersey", "jared"]):
+                    after = " ".join(words[2:]).strip()
+                    return True, after
+
+        return False, ""
 
     wake_ring = deque(maxlen=int(2.0 * SAMPLE_RATE / BLOCK_SIZE))
 
     with stream:
         print("[Vosk] Listening for wake word ('Jarvis' or press ENTER)...", flush=True)
         while True:
-            # Instant Keyboard trigger: Press ENTER or Space in terminal anytime to talk
+            # Instant Keyboard trigger: Press ENTER or Space in terminal anytime
             if msvcrt.kbhit():
                 ch = msvcrt.getch()
                 if ch in [b'\r', b'\n', b' ']:
                     print("\n[!] Keyboard trigger activated! Listening for command...", flush=True)
                     rec.Reset()
                     _drain_queue()
-                    handle_wake(None, ui_pill)
+                    handle_wake(None, ui_pill, pre_extracted_command="")
                     wake_ring.clear()
                     rec.Reset()
                     print("\n[Vosk] Listening for 'Jarvis' (or press ENTER)...", flush=True)
                     continue
 
-            data = audio_queue.get()
+            try:
+                data = audio_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
             wake_ring.append(data)
 
             heard_text = ""
+            is_final = False
             if rec.AcceptWaveform(data):
                 res = json.loads(rec.Result())
                 heard_text = res.get("text", "").lower().strip()
+                is_final = True
                 if heard_text:
                     print(f"\n[Vosk heard]: '{heard_text}'", flush=True)
             else:
                 part = json.loads(rec.PartialResult())
                 heard_text = part.get("partial", "").lower().strip()
                 if heard_text:
-                    print(f"  [Hearing]: {heard_text}   ", end="\r", flush=True)
+                    print(f"  [Hearing]: {heard_text}   \r", end="", flush=True)
 
-            if heard_text and is_wake_word(heard_text):
-                print(f"\n[!] Wake word triggered: '{heard_text}'", flush=True)
-                rec.Reset()
+            if heard_text:
+                triggered, command_tail = extract_wake_and_command(heard_text)
+                if triggered:
+                    print(f"\n[!] Wake word triggered: '{heard_text}'", flush=True)
+                    rec.Reset()
 
-                wake_audio = b"".join(wake_ring)
-                _drain_queue()
+                    wake_audio = b"".join(wake_ring)
+                    _drain_queue()
 
-                handle_wake(wake_audio, ui_pill)
+                    handle_wake(wake_audio, ui_pill, pre_extracted_command=command_tail)
 
-                wake_ring.clear()
-                rec.Reset()
-                print("\n[Vosk] Listening for 'Jarvis' (or press ENTER)...", flush=True)
+                    wake_ring.clear()
+                    rec.Reset()
+                    print("\n[Vosk] Listening for 'Jarvis' (or press ENTER)...", flush=True)
 
 
 if __name__ == "__main__":

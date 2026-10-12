@@ -1,6 +1,20 @@
 import os
 import numpy as np
 import pyttsx3
+from dotenv import load_dotenv
+
+# Ensure environment variables are loaded
+_base_dir = os.path.dirname(os.path.abspath(__file__))
+_env_path = os.path.join(_base_dir, ".env")
+if os.path.exists(_env_path):
+    load_dotenv(_env_path)
+
+# Suppress Hugging Face symlink warnings on Windows
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+if "HF_HOME" not in os.environ and os.path.exists(r"E:\.cache\huggingface"):
+    os.environ["HF_HOME"] = r"E:\.cache\huggingface"
+if "HF_HUB_CACHE" not in os.environ and os.path.exists(r"E:\.cache\huggingface\hub"):
+    os.environ["HF_HUB_CACHE"] = r"E:\.cache\huggingface\hub"
 
 
 class SpeechEngine:
@@ -8,7 +22,7 @@ class SpeechEngine:
         # Initialize Text-To-Speech engine with JARVIS voice profile
         self.tts = pyttsx3.init()
         try:
-            # SAPI5 voice selection (select British voice if present, else male David)
+            # SAPI5 voice selection (prefer David or British voice)
             voices = self.tts.getProperty("voices")
             preferred_voice = None
             for v in voices:
@@ -31,24 +45,26 @@ class SpeechEngine:
         self.whisper_model = None
         try:
             from faster_whisper import WhisperModel
-            hf_hub = os.environ.get("HF_HUB_CACHE", "E:/.cache/huggingface/hub")
+            hf_hub = os.environ.get("HF_HUB_CACHE", r"E:\.cache\huggingface\hub")
+            if not os.path.exists(hf_hub):
+                hf_hub = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
             self.whisper_model = WhisperModel(model_size, download_root=hf_hub, device=device, compute_type=compute_type)
         except Exception as e:
             print(f"[Warning] Could not initialize faster_whisper: {e}")
 
     def speak(self, text: str):
         """Converts text to speech and prints response."""
-        print(f"[J.A.R.V.I.S.]: {text}")
+        print(f"[J.A.R.V.I.S.]: {text}", flush=True)
         try:
             self.tts.say(text)
             self.tts.runAndWait()
         except Exception as e:
-            print(f"[TTS Error]: {e}")
+            print(f"[TTS Error]: {e}", flush=True)
 
     def transcribe(self, audio_bytes: bytes) -> str:
         """Transcribes PCM 16-bit mono audio bytes into text."""
         if not self.whisper_model:
-            print("[SpeechEngine] Whisper model unavailable.")
+            print("[SpeechEngine] Whisper model unavailable.", flush=True)
             return ""
         
         try:
@@ -58,13 +74,13 @@ class SpeechEngine:
                 audio_np,
                 beam_size=5,
                 initial_prompt=(
-                    "J.A.R.V.I.S. desktop assistant. Commands: launch VS Code, Chrome, Terminal, "
-                    "system briefing, system status, battery, volume up, volume down, mute, screenshot, "
+                    "J.A.R.V.I.S. desktop assistant. Commands: launch VS Code, Chrome, Terminal, Notepad, "
+                    "system briefing, system status, battery, CPU, RAM, volume up, volume down, mute, screenshot, "
                     "minimize, lock, coding mode, break mode, remember that."
                 )
             )
             text = " ".join([segment.text for segment in segments]).strip()
             return text
         except Exception as e:
-            print(f"[Transcribe Error]: {e}")
+            print(f"[Transcribe Error]: {e}", flush=True)
             return ""

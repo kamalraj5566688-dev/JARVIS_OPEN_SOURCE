@@ -65,7 +65,7 @@ class SpeakerVerifier:
         except Exception as e:
             print(f"[SpeakerVerifier] Failed to load voice profile: {e}")
             return None
-# ------------------------------------------------------------------ #
+    # ------------------------------------------------------------------ #
     # Public API
     # ------------------------------------------------------------------ #
     @property

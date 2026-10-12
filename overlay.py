@@ -13,38 +13,38 @@ class StatusPill:
         self.THEMES = {
             "IDLE": {
                 "dot": "#6b7280",       # Slate gray
-                "text": "Jaddu: Idle",
-                "sub": "Say 'Hello Jaddu'",
+                "text": "J.A.R.V.I.S.: Idle",
+                "sub": "Say 'Hey Jarvis'",
                 "border": "#27272a"
             },
             "LISTENING": {
                 "dot": "#22c55e",       # Vivid emerald green
-                "text": "Jaddu: Listening...",
-                "sub": "Bolte rahiye...",
+                "text": "J.A.R.V.I.S.: Listening...",
+                "sub": "Speak now...",
                 "border": "#15803d"
             },
             "VERIFYING": {
                 "dot": "#eab308",       # Warm Amber
-                "text": "Jaddu: Verifying Voice...",
-                "sub": "Aapki pehchaan check ho rahi hai",
+                "text": "J.A.R.V.I.S.: Verifying Voice...",
+                "sub": "Authenticating voice biometrics",
                 "border": "#a16207"
             },
             "THINKING": {
                 "dot": "#eab308",       # Warm Amber
-                "text": "Jaddu: Thinking...",
+                "text": "J.A.R.V.I.S.: Thinking...",
                 "sub": "Processing action...",
                 "border": "#a16207"
             },
             "SPEAKING": {
                 "dot": "#38bdf8",       # Neon Cyan
-                "text": "Jaddu: Speaking",
+                "text": "J.A.R.V.I.S.: Speaking",
                 "sub": "Playing response",
                 "border": "#0284c7"
             },
             "REJECTED": {
                 "dot": "#ef4444",       # Alert Red
-                "text": "Jaddu: Unverified Voice",
-                "sub": "Ye aawaz verify nahi hui",
+                "text": "J.A.R.V.I.S.: Unverified Voice",
+                "sub": "Voice authentication failed",
                 "border": "#991b1b"
             }
         }

@@ -20,11 +20,22 @@ DEFAULT_MEMORY = {
         "safe_mode": True
     },
     "facts": {
-        "workspace": "D:/VOICE ASS",
+        "workspace": "E:/VOICE ASS",
         "assistant_name": "J.A.R.V.I.S."
     },
     "recent_interactions": []
 }
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merges `override` into `base`, preserving nested default keys."""
+    merged = base.copy()
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 class JarvisMemory:
@@ -42,9 +53,7 @@ class JarvisMemory:
             try:
                 with open(self.memory_path, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
-                    merged = DEFAULT_MEMORY.copy()
-                    merged.update(loaded)
-                    return merged
+                    return _deep_merge(DEFAULT_MEMORY, loaded)
             except Exception as e:
                 print(f"[Memory] Warning: Could not read memory file ({e}). Initializing defaults.")
         return DEFAULT_MEMORY.copy()

@@ -218,7 +218,7 @@ class DesktopController:
             return "Showing desktop, sir."
         elif "lock" in action:
             if system == "windows":
-                subprocess.run("rundll32.exe user32.dll,LockWorkStation")
+                subprocess.run(["rundll32.exe", "user32.dll,LockWorkStation"])
                 return "Workstation locked, sir."
             return "Workstation lock is unsupported on this platform."
         return "Window operation not recognized, sir."
