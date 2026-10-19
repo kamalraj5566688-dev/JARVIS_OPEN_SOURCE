@@ -21,15 +21,12 @@ It features **biometric speaker voice verification**, ensuring it responds stric
 
 ---
 
-## 🎬 Launch Demo & Overview Video
+## 🎬 Launch Demo
 
-Watch the 35-second launch overview demonstrating 100% offline sovereignty, biometric speaker verification, and autonomous local self-learning:
+![J.A.R.V.I.S. Launch Demo](brag-output/demo.gif)
 
-https://github.com/kamalraj5566688-dev/JARVIS_OPEN_SOURCE/raw/main/brag-output/brag.mp4
-
-[![J.A.R.V.I.S. Demo Video Thumbnail](brag-output/brag.jpg)](brag-output/brag.mp4)
-
-*Click the image or player above to watch [`brag.mp4`](brag-output/brag.mp4) with full 1080p motion and audio.*
+> 🔊 **Prefer full 1080p video with audio & soundtrack?**  
+> ▶️ **[Watch & Listen to `brag.mp4`](brag-output/brag.mp4)** *(or download the raw file directly)*
 
 ---
 
