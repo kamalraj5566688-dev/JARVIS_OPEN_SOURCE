@@ -62,6 +62,7 @@ Thumbs.db
 desktop.ini
 .idea/
 .vscode/
+.agents/
 *.swp
 *.swo
 

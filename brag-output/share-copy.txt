@@ -1,7 +1,0 @@
-WHY DOES YOUR AI ASSISTANT NEED THE INTERNET TO OPEN A FILE?!
-
-I got tired of glorified cloud wrappers, so I built J.A.R.V.I.S. — an Iron Man-grade desktop assistant that runs 100% OFFLINE on consumer hardware.
-
-Speaker voice biometrics + local Ollama brain + sub-20ms deterministic reflex fallback + autonomous on-device 4-bit QLoRA fine-tuning on local RTX GPUs.
-
-100% Open Source under MIT: https://github.com/kamalraj5566688-dev/JARVIS_OPEN_SOURCE
