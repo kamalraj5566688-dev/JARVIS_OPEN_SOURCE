@@ -47,21 +47,26 @@ def copy_to_clipboard(text: str):
         pass
 
 def show_summary():
-    brief_file = BRAG_OUTPUT / "brief.md"
+    brief_file = BRAG_OUTPUT / "brag-plan.md"
+    if not brief_file.exists():
+        brief_file = BRAG_OUTPUT / "composition-brief.md"
+    if not brief_file.exists():
+        brief_file = BRAG_OUTPUT / "brief.md"
+
     if brief_file.exists():
         print("\n" + "=" * 60)
-        print("🎬 2-MINUTE LINKEDIN DEMO VIDEO STORYBOARD")
+        print("🎬 J.A.R.V.I.S. LAUNCH STORYBOARD & BRIEF")
         print("=" * 60 + "\n")
         print(brief_file.read_text(encoding="utf-8"))
     else:
-        print("[!] brag-output/brief.md not found. Generating...")
+        print("[!] brag-output/brag-plan.md not found.")
 
 def show_copy():
     copy_file = BRAG_OUTPUT / "share-copy.txt"
     if copy_file.exists():
         content = copy_file.read_text(encoding="utf-8")
         print("\n" + "=" * 60)
-        print("📱 READY-TO-POST LINKEDIN CAPTION")
+        print("📱 READY-TO-POST LAUNCH CAPTION")
         print("=" * 60 + "\n")
         print(content)
         copy_to_clipboard(content)
@@ -69,11 +74,14 @@ def show_copy():
         print("[!] brag-output/share-copy.txt not found.")
 
 def show_plan():
-    plan_file = BRAG_OUTPUT / "plan.md"
+    plan_file = BRAG_OUTPUT / "brag-plan.md"
+    if not plan_file.exists():
+        plan_file = BRAG_OUTPUT / "plan.md"
+
     if plan_file.exists():
         print(plan_file.read_text(encoding="utf-8"))
     else:
-        print("[!] brag-output/plan.md not found.")
+        print("[!] brag-output/brag-plan.md not found.")
 
 def main():
     arg = sys.argv[1].lower() if len(sys.argv) > 1 else "--summary"
